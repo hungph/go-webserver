@@ -18,13 +18,13 @@ var SignUp = func(resWriter http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		resEntity := res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), res.TimeDiff(curTime),
 			err.Error())
-		res.Respond(resWriter, resEntity)
+		res.Respond(resWriter, 500, resEntity)
 
 		return
 	}
 
-	resp := models.CreateUser(resUser.GetUserName(), resUser.GetPasswd())
-	res.Respond(resWriter, resp)
+	resp, httpCode := models.CreateUser(resUser.GetUserName(), resUser.GetPasswd())
+	res.Respond(resWriter, httpCode, resp)
 }
 
 var SignIn = func(resWriter http.ResponseWriter, req *http.Request) {
@@ -37,11 +37,11 @@ var SignIn = func(resWriter http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		resEntity := res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), res.TimeDiff(curTime),
 			err.Error())
-		res.Respond(resWriter, resEntity)
+		res.Respond(resWriter, 500, resEntity)
 
 		return
 	}
 
-	resp := models.Signin(resUser.GetUserName(), resUser.GetPasswd())
-	res.Respond(resWriter, resp)
+	resp, httpCode := models.Signin(resUser.GetUserName(), resUser.GetPasswd())
+	res.Respond(resWriter, httpCode, resp)
 }

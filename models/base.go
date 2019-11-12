@@ -28,7 +28,11 @@ func GetDynamoDBClient() *dynamodb.DynamoDB {
 }
 
 func GetTableName() string {
-	return os.Getenv("dynamodb_table")
+	if os.Getenv("runType") != "test" {
+		return os.Getenv("dynamodb_table")
+	} else {
+		return os.Getenv("dynamodb_table_test")
+	}
 }
 
 func init() {

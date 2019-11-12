@@ -2,6 +2,7 @@ package models
 
 import (
 	res "../utils"
+	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
@@ -28,7 +29,7 @@ type User struct {
 	CreDt     int64
 }
 
-func ValidateUsername(userName string, passWd string) (map[string]interface{}, bool) {
+func ValidateUsername(userName string, passWd string, checkExisted bool) (map[string]interface{}, bool) {
 	//Username must not be empty
 	if strings.TrimSpace(userName) == "" {
 		return res.ResponseEntity(
@@ -45,42 +46,44 @@ func ValidateUsername(userName string, passWd string) (map[string]interface{}, b
 			false
 	}
 
-	//Check if username is existed
-	dynamoRes, err := GetDynamoDBClient().GetItem(&dynamodb.GetItemInput{
-		Key: map[string]*dynamodb.AttributeValue{
-			"UserNm": {
-				S: aws.String(userName),
+	if checkExisted {
+		//Check if username is existed
+		dynamoRes, err := GetDynamoDBClient().GetItem(&dynamodb.GetItemInput{
+			Key: map[string]*dynamodb.AttributeValue{
+				"UserNm": {
+					S: aws.String(userName),
+				},
 			},
-		},
-		TableName: aws.String(GetTableName()),
-	})
+			TableName: aws.String(GetTableName()),
+		})
 
-	if err != nil {
-		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), 0,
-			err.Error()), false
-	}
+		if err != nil {
+			return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), 0,
+				err.Error()), false
+		}
 
-	dbUser := User{}
-	err = dynamodbattribute.UnmarshalMap(dynamoRes.Item, &dbUser)
+		dbUser := User{}
+		err = dynamodbattribute.UnmarshalMap(dynamoRes.Item, &dbUser)
 
-	if err != nil {
-		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), 0,
-			err.Error()), false
-	}
+		if err != nil {
+			return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), 0,
+				err.Error()), false
+		}
 
-	if dbUser.UserNm != "" {
-		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.UsernameDuplicate.Code(), 0,
-			res.ErrorConstants.UsernameDuplicate.Message()), false
+		if dbUser.UserNm != "" {
+			return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.UsernameDuplicate.Code(), 0,
+				res.ErrorConstants.UsernameDuplicate.Message()), false
+		}
 	}
 
 	return res.ResponseEntity(res.ErrorConstants.Success.Code(), "", 0, ""), true
 }
 
-func CreateUser(userName string, passWd string) map[string]interface{} {
+func CreateUser(userName string, passWd string) (map[string]interface{}, int) {
 	curTime := time.Now().UnixNano() / 1000000
 
-	if resp, ok := ValidateUsername(userName, passWd); !ok {
-		return resp
+	if resp, ok := ValidateUsername(userName, passWd, true); !ok {
+		return resp, 400
 	}
 
 	encryptedPass := res.EncryptString(passWd)
@@ -93,7 +96,7 @@ func CreateUser(userName string, passWd string) map[string]interface{} {
 
 	if err != nil {
 		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), res.TimeDiff(curTime),
-			err.Error())
+			err.Error()), 500
 	}
 
 	_, err = GetDynamoDBClient().PutItem(&dynamodb.PutItemInput{
@@ -103,15 +106,19 @@ func CreateUser(userName string, passWd string) map[string]interface{} {
 
 	if err != nil {
 		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), res.TimeDiff(curTime),
-			err.Error())
+			err.Error()), 500
 	}
 
 	return res.ResponseEntity(res.ErrorConstants.Success.Code(), res.ErrorConstants.SignupSuccessfully.Code(), res.TimeDiff(curTime),
-		res.ErrorConstants.SignupSuccessfully.Message())
+		res.ErrorConstants.SignupSuccessfully.Message()), 200
 }
 
-func Signin(userName string, passWd string) map[string]interface{} {
+func Signin(userName string, passWd string) (map[string]interface{}, int) {
 	curTime := time.Now().UnixNano() / 1000000
+
+	if resp, ok := ValidateUsername(userName, passWd, false); !ok {
+		return resp, 400
+	}
 
 	//Check username
 	dynamoRes, err := GetDynamoDBClient().GetItem(&dynamodb.GetItemInput{
@@ -125,7 +132,7 @@ func Signin(userName string, passWd string) map[string]interface{} {
 
 	if err != nil {
 		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.SystemError.Code(), res.TimeDiff(curTime),
-			err.Error())
+			err.Error()), 500
 	}
 
 	dbUser := User{}
@@ -133,7 +140,7 @@ func Signin(userName string, passWd string) map[string]interface{} {
 
 	if dbUser.UserNm == "" {
 		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.UsernameNotExisted.Code(), res.TimeDiff(curTime),
-			res.ErrorConstants.UsernameNotExisted.Message())
+			res.ErrorConstants.UsernameNotExisted.Message()), 400
 	}
 
 	//Compare passwd
@@ -141,12 +148,27 @@ func Signin(userName string, passWd string) map[string]interface{} {
 
 	if dbUser.EncPasswd != encryptedPass {
 		return res.ResponseEntity(res.ErrorConstants.Failed.Code(), res.ErrorConstants.PasswordNotMatched.Code(), res.TimeDiff(curTime),
-			res.ErrorConstants.PasswordNotMatched.Message())
+			res.ErrorConstants.PasswordNotMatched.Message()), 400
 	}
 
 	//Generate Random token
 	randToken := res.RandomString()
 
 	return res.ResponseEntity(res.ErrorConstants.Success.Code(), res.ErrorConstants.SignupSuccessfully.Code(), res.TimeDiff(curTime),
-		randToken)
+		randToken), 200
+}
+
+func DeleteUser(userName string) {
+	_, err := GetDynamoDBClient().DeleteItem(&dynamodb.DeleteItemInput{
+		Key: map[string]*dynamodb.AttributeValue{
+			"UserNm": {
+				S: aws.String(userName),
+			},
+		},
+		TableName: aws.String(GetTableName()),
+	})
+
+	if err != nil {
+		fmt.Println(err)
+	}
 }
